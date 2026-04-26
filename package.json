@@ -1,0 +1,41 @@
+{
+  "name": "appointments",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "deploy": "serverless deploy",
+    "remove": "serverless remove",
+    "pretest": "tsc -p tsconfig.json",
+    "test": "jest --passWithNoTests",
+    "docs": "redoc-cli bundle ./src/docs/openapi.yaml -o ./docs/swagger.html"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.891.0",
+    "@aws-sdk/client-eventbridge": "^3.634.0",
+    "@aws-sdk/client-sns": "^3.634.0",
+    "@aws-sdk/client-sqs": "^3.634.0",
+    "@aws-sdk/client-ssm": "^3.888.0",
+    "@aws-sdk/lib-dynamodb": "^3.634.0",
+    "mysql2": "^3.11.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.137",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^24.3.1",
+    "aws-sdk-client-mock": "^4.1.0",
+    "esbuild": "^0.25.9",
+    "http-server": "^14.1.1",
+    "jest": "^29.7.0",
+    "redoc-cli": "^0.13.21",
+    "serverless": "^3.39.0",
+    "serverless-esbuild": "^1.55.1",
+    "serverless-offline": "^13.9.0",
+    "ts-jest": "^29.4.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2"
+  }
+}

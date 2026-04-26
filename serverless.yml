@@ -1,0 +1,349 @@
+service: appointments
+frameworkVersion: "3"
+
+custom:
+  esbuild:
+    bundle: true
+    minify: false
+    sourcemap: false
+    target: node20
+    platform: node
+    external: []
+    exclude: []
+    keepOutputDirectory: true
+    concurrency: 10
+  rds:
+    vpcId: vpc-0370f7d3817b84984
+    subnet1: subnet-02403ccacdf0e3b92
+    subnet2: subnet-07192c54e6cd853da
+
+functions:
+  dbInit:
+    handler: src/infra/db-init.handler
+    timeout: 300
+    memorySize: 256
+  secretsInit:
+    handler: src/infra/secrets-init.handler
+    timeout: 60
+    memorySize: 256
+  createAppointment:
+    handler: src/api/lambda/appointment.createAppointment
+    events:
+      - httpApi:
+          path: /appointments
+          method: post
+  listByInsured:
+    handler: src/api/lambda/appointment.listByInsured
+    events:
+      - httpApi:
+          path: /appointments/{insuredId}
+          method: get
+  confirmAppointment:
+    handler: src/api/lambda/appointment.confirmAppointment
+    events:
+      - sqs:
+          arn: { Fn::GetAtt: [ConfirmationsQueue, Arn] }
+          batchSize: 10
+  appointmentPE:
+    handler: src/api/lambda/appointment_pe.handler
+    environment:
+      RDS_PE_HOST:
+        Fn::GetAtt: [RDSPE, Endpoint.Address]
+    events:
+      - sqs:
+          arn: { Fn::GetAtt: [SQSPE, Arn] }
+          batchSize: 10
+    timeout: 30
+    memorySize: 512
+  appointmentCL:
+    handler: src/api/lambda/appointment_cl.handler
+    environment:
+      RDS_CL_HOST:
+        Fn::GetAtt: [RDSCL, Endpoint.Address]
+    events:
+      - sqs:
+          arn: { Fn::GetAtt: [SQSCL, Arn] }
+          batchSize: 10
+    timeout: 30
+    memorySize: 512
+
+plugins:
+  - serverless-esbuild
+  - serverless-offline
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: us-east-1
+  architecture: arm64
+  logRetentionInDays: 7
+  environment:
+    TABLE_APPOINTMENTS: { Ref: AppointmentsTable }
+    RDS_PE_HOST_SSM: /appointments/rds/pe/host
+    RDS_CL_HOST_SSM: /appointments/rds/cl/host
+    RDS_PASSWORD_SSM: /appointments/rds/password
+    RDS_PE_PORT: "3306"
+    RDS_CL_PORT: "3306"
+    RDS_PE_DATABASE: appointmentspe
+    RDS_CL_DATABASE: appointmentscl
+    RDS_USER: admin
+    SNS_APPOINTMENTS_ARN: { Ref: AppointmentTopic }
+    EB_BUS_NAME: { Ref: AppointmentBus }
+    SQS_PE_URL: { Ref: SQSPE }
+    SQS_PE_ARN: { Fn::GetAtt: [SQSPE, Arn] }
+    SQS_CL_URL: { Ref: SQSCL }
+    SQS_CL_ARN: { Fn::GetAtt: [SQSCL, Arn] }
+    CONFIRMATIONS_SQS_URL: { Ref: ConfirmationsQueue }
+    CONFIRMATIONS_SQS_ARN: { Fn::GetAtt: [ConfirmationsQueue, Arn] }
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:PutItem
+            - dynamodb:Query
+            - dynamodb:GetItem
+            - dynamodb:UpdateItem
+          Resource:
+            - Fn::GetAtt: [AppointmentsTable, Arn]
+            - Fn::Join:
+                - "/"
+                - - Fn::GetAtt: [AppointmentsTable, Arn]
+                  - index
+                  - byInsured
+        - Effect: Allow
+          Action: sns:Publish
+          Resource: { Ref: AppointmentTopic }
+        - Effect: Allow
+          Action:
+            - sqs:SendMessage
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+          Resource:
+            - Fn::GetAtt: [SQSPE, Arn]
+            - Fn::GetAtt: [SQSCL, Arn]
+            - Fn::GetAtt: [ConfirmationsQueue, Arn]
+        - Effect: Allow
+          Action: events:PutEvents
+          Resource: "*"
+        - Effect: Allow
+          Action: ssm:GetParameter
+          Resource: arn:aws:ssm:${self:provider.region}:${aws:accountId}:parameter/appointments/rds/*
+        - Effect: Allow
+          Action: kms:Decrypt
+          Resource: arn:aws:kms:${self:provider.region}:${aws:accountId}:alias/aws/ssm
+        - Effect: Allow
+          Action:
+            - secretsmanager:GetSecretValue
+          Resource:
+            - { Ref: RdsMasterSecret }
+
+resources:
+  Resources:
+    AppointmentsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: Appointments
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: appointmentUuid
+            AttributeType: S
+          - AttributeName: insuredId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: appointmentUuid
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: byInsured
+            KeySchema:
+              - AttributeName: insuredId
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+    AppointmentTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: appointmentTopic
+    SQSPE:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: appointments-pe
+    SQSCL:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: appointments-cl
+    TopicSubscriptionPE:
+      Type: AWS::SNS::Subscription
+      Properties:
+        Protocol: sqs
+        TopicArn: { Ref: AppointmentTopic }
+        Endpoint: { Fn::GetAtt: [SQSPE, Arn] }
+        FilterPolicy:
+          countryISO: [PE]
+        RawMessageDelivery: true
+    TopicSubscriptionCL:
+      Type: AWS::SNS::Subscription
+      Properties:
+        Protocol: sqs
+        TopicArn: { Ref: AppointmentTopic }
+        Endpoint: { Fn::GetAtt: [SQSCL, Arn] }
+        FilterPolicy:
+          countryISO: [CL]
+        RawMessageDelivery: true
+    SQSPolicyPE:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues: [{ Ref: SQSPE }]
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal: { Service: sns.amazonaws.com }
+              Action: sqs:SendMessage
+              Resource: { Fn::GetAtt: [SQSPE, Arn] }
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: { Ref: AppointmentTopic }
+    SQSPolicyCL:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues: [{ Ref: SQSCL }]
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal: { Service: sns.amazonaws.com }
+              Action: sqs:SendMessage
+              Resource: { Fn::GetAtt: [SQSCL, Arn] }
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: { Ref: AppointmentTopic }
+    AppointmentBus:
+      Type: AWS::Events::EventBus
+      Properties:
+        Name: appointments-bus
+    ConfirmationsQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: appointments-confirmaciones
+    EventRuleToSQS:
+      Type: AWS::Events::Rule
+      Properties:
+        EventBusName: { Ref: AppointmentBus }
+        EventPattern:
+          source: [appointment.pe, appointment.cl]
+          detail-type: [AppointmentConfirmed]
+        Targets:
+          - Arn: { Fn::GetAtt: [ConfirmationsQueue, Arn] }
+            Id: ToConfirmationsQueueTarget
+    AllowEventBridgeToSQS:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues: [{ Ref: ConfirmationsQueue }]
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal: { Service: events.amazonaws.com }
+              Action: sqs:SendMessage
+              Resource: { Fn::GetAtt: [ConfirmationsQueue, Arn] }
+    RdsSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: Allow MySQL inbound (demo)
+        VpcId: ${self:custom.rds.vpcId}
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 3306
+            ToPort: 3306
+            CidrIp: 0.0.0.0/0
+    RdsSubnetGroup:
+      Type: AWS::RDS::DBSubnetGroup
+      Properties:
+        DBSubnetGroupDescription: Subnets for appointments RDS
+        SubnetIds:
+          - ${self:custom.rds.subnet1}
+          - ${self:custom.rds.subnet2}
+    SecretsInitCustom:
+      Type: Custom::PasswordToSSM
+      Properties:
+        ServiceToken: { Fn::GetAtt: [SecretsInitLambdaFunction, Arn] }
+        Action: copySecretToSsm
+        SecretArn: { Ref: RdsMasterSecret }
+        SsmName: /appointments/rds/password
+    DbInit:
+      Type: Custom::DbInit
+      Properties:
+        ServiceToken: { Fn::GetAtt: [DbInitLambdaFunction, Arn] }
+        Action: initDbTables
+        PeHost: { Fn::GetAtt: [RDSPE, Endpoint.Address] }
+        ClHost: { Fn::GetAtt: [RDSCL, Endpoint.Address] }
+        PeDb: ${self:provider.environment.RDS_PE_DATABASE}
+        ClDb: ${self:provider.environment.RDS_CL_DATABASE}
+        User: ${self:provider.environment.RDS_USER}
+        PasswordSsm: ${self:provider.environment.RDS_PASSWORD_SSM}
+      DependsOn:
+        - RDSPE
+        - RDSCL
+        - SecretsInitCustom
+    RDSPE:
+      Type: AWS::RDS::DBInstance
+      DependsOn: SecretsInitCustom
+      Properties:
+        DBInstanceIdentifier: ${self:service}-pe
+        AllocatedStorage: 20
+        DBInstanceClass: db.t4g.micro
+        Engine: mysql
+        EngineVersion: "8.0"
+        MasterUsername: ${self:provider.environment.RDS_USER}
+        MasterUserPassword: "{{resolve:ssm-secure:/appointments/rds/password}}"
+        DBName: ${self:provider.environment.RDS_PE_DATABASE}
+        PubliclyAccessible: true
+        VPCSecurityGroups:
+          - Fn::GetAtt: [RdsSecurityGroup, GroupId]
+        DBSubnetGroupName:
+          Ref: RdsSubnetGroup
+        DeletionProtection: false
+        BackupRetentionPeriod: 0
+        MultiAZ: false
+    RDSCL:
+      Type: AWS::RDS::DBInstance
+      DependsOn: SecretsInitCustom
+      Properties:
+        DBInstanceIdentifier: ${self:service}-cl
+        AllocatedStorage: 20
+        DBInstanceClass: db.t4g.micro
+        Engine: mysql
+        EngineVersion: "8.0"
+        MasterUsername: ${self:provider.environment.RDS_USER}
+        MasterUserPassword: "{{resolve:ssm-secure:/appointments/rds/password}}"
+        DBName: ${self:provider.environment.RDS_CL_DATABASE}
+        PubliclyAccessible: true
+        VPCSecurityGroups:
+          - Fn::GetAtt: [RdsSecurityGroup, GroupId]
+        DBSubnetGroupName:
+          Ref: RdsSubnetGroup
+        DeletionProtection: false
+        BackupRetentionPeriod: 0
+        MultiAZ: false
+    RDSPEHostParam:
+      Type: AWS::SSM::Parameter
+      Properties:
+        Name: /appointments/rds/pe/host
+        Type: String
+        Value: { Fn::GetAtt: [RDSPE, Endpoint.Address] }
+    RDSCLHostParam:
+      Type: AWS::SSM::Parameter
+      Properties:
+        Name: /appointments/rds/cl/host
+        Type: String
+        Value: { Fn::GetAtt: [RDSCL, Endpoint.Address] }
+    RdsMasterSecret:
+      Type: AWS::SecretsManager::Secret
+      Properties:
+        GenerateSecretString:
+          SecretStringTemplate: '{"username":"admin"}'
+          GenerateStringKey: password
+          PasswordLength: 20
+          ExcludeCharacters: '"@/\'

@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "strict": true,
+    "rootDir": ".",
+    "outDir": "dist",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "baseUrl": "src",
+    "paths": {
+      "@domain/*": ["domain/*"],
+      "@app/*": ["app/*"],
+      "@infra/*": ["infra/*"],
+      "@api/*": ["api/*"],
+      "@shared/*": ["shared/*"]
+    }
+  },
+  "include": ["src", "tests"],
+  "exclude": ["node_modules", "dist", ".serverless", ".esbuild"]
+}

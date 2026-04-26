@@ -1,0 +1,187 @@
+openapi: 3.1.0
+info:
+  title: Appointments API
+  version: 1.0.0
+  description: >
+    API for creating and listing appointments. Confirmation is performed asynchronously
+    (SNS → SQS → RDS → EventBridge → SQS) and updates the status in DynamoDB to "completed."
+  contact:
+    email: alexander.prieto.chavez@gmail.com
+servers:
+  - url: https://{apiId}.execute-api.{region}.amazonaws.com
+    description: API Gateway HTTP API ($default)
+    variables:
+      apiId:
+        default: q6pljavrk0
+      region:
+        default: us-east-1
+tags:
+  - name: Appointments
+    description: Appointment creation and consultation operations
+paths:
+  /appointments:
+    post:
+      tags: [Appointments]
+      operationId: createAppointment
+      summary: Create a new appointment (initial status "pending")
+      description: Creates an appointment with initial status "pending" and returns the created appointment object.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAppointmentRequest"
+            examples:
+              example:
+                value:
+                  insuredId: "01234"
+                  scheduleId: 100
+                  countryISO: "PE"
+      responses:
+        "201":
+          description: Appointment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+              examples:
+                example:
+                  value:
+                    appointmentUuid: "8b2c1f2e-7c24-4a5a-9b4c-6d2e7b1a1b01"
+                    insuredId: "01234"
+                    scheduleId: 100
+                    countryISO: "PE"
+                    status: "pending"
+                    createdAt: "2025-09-13T14:12:00.000Z"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                faltanCampos:
+                  value:
+                    {
+                      error: "insuredId, scheduleId and countryISO are required",
+                    }
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /appointments/{insuredId}:
+    get:
+      tags: [Appointments]
+      operationId: listByInsured
+      summary: List appointments by insured
+      description: List appointments by insured
+      parameters:
+        - in: path
+          name: insuredId
+          required: true
+          description: Insured code (5 digits, with leading zeros if applicable)
+          schema:
+            type: string
+            pattern: '^\d{5}$'
+          example: "01234"
+      responses:
+        "200":
+          description: List insured appointments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Appointment"
+              examples:
+                example:
+                  value:
+                    - appointmentUuid: "8b2c1f2e-7c24-4a5a-9b4c-6d2e7b1a1b01"
+                      insuredId: "01234"
+                      scheduleId: 100
+                      countryISO: "PE"
+                      status: "completed"
+                      createdAt: "2025-09-13T14:12:00.000Z"
+        "400":
+          description: Parameter validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalido:
+                  value: { error: "insuredId required" }
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  schemas:
+    CreateAppointmentRequest:
+      type: object
+      required: [insuredId, scheduleId, countryISO]
+      properties:
+        insuredId:
+          type: string
+          description: Insured code (5 digits, with leading zeros if applicable)
+          pattern: '^\d{5}$'
+          example: "01234"
+        scheduleId:
+          type: integer
+          description: Space identifier or key to schedule an appointment. “Space” is the set of 4 fields (medical center, specialty, doctor, and date and time).
+          example: 100
+        countryISO:
+          type: string
+          description: Country identifier
+          enum: [PE, CL]
+          example: PE
+    Appointment:
+      type: object
+      required:
+        - appointmentUuid
+        - insuredId
+        - scheduleId
+        - countryISO
+        - status
+        - createdAt
+      properties:
+        appointmentUuid:
+          type: string
+          format: uuid
+          description: Unique appointment identifier
+          example: "8b2c1f2e-7c24-4a5a-9b4c-6d2e7b1a1b01"
+        insuredId:
+          type: string
+          description: Insured code (5 digits, with leading zeros if applicable)
+          pattern: '^\d{5}$'
+          example: "01234"
+        scheduleId:
+          type: integer
+          description: Space identifier or key to schedule an appointment. “Space” is the set of 4 fields (medical center, specialty, doctor, and date and time).
+          example: 100
+        countryISO:
+          type: string
+          description: ISO country code
+          enum: [PE, CL]
+          example: PE
+        status:
+          type: string
+          description: Appointment status
+          enum: [pending, completed]
+          example: pending
+        createdAt:
+          type: string
+          format: date-time
+          description: Creation date in ISO 8601 (UTC)
+          example: "2025-09-13T14:12:00.000Z"
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
