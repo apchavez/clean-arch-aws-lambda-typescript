@@ -42,8 +42,11 @@ export const handler = async (
   try {
     const secret = await getSecret();
     const payload = verifyJwt(token, secret);
-    logger.info("authorizer: token accepted", { sub: payload.sub });
-    return { isAuthorized: true, context: { sub: payload.sub } };
+    logger.info("authorizer: token accepted", { sub: payload.sub, role: payload.role });
+    return {
+      isAuthorized: true,
+      context: { sub: payload.sub, role: payload.role },
+    };
   } catch (err) {
     logger.warn("authorizer: token rejected", { error: String(err) });
     return { isAuthorized: false };

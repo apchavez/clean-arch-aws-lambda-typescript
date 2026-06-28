@@ -142,7 +142,9 @@ components:
       bearerFormat: JWT
       description: >
         HS256 JWT signed with the secret stored in SSM at /appointments/jwt/secret.
-        Generate a token with: signJwt(sub, secret, expiresInSeconds) from src/infra/jwt.ts.
+        The payload must include a `role` claim: "agent" or "insured".
+        Roles: agent = full access to any insuredId;
+               insured = can only create/view their own appointments (sub must match insuredId).
   schemas:
     CreateAppointmentRequest:
       type: object

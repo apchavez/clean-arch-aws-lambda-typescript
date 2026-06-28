@@ -125,19 +125,31 @@ Authorization: Bearer <token>
 
 Tokens are **HS256** JWTs signed with a secret stored in SSM at `/appointments/jwt/secret`. The secret is generated automatically on first deploy by the `JwtSecretInit` CloudFormation custom resource.
 
-**Generate a token (dev/testing):**
+### Roles
+
+| Role | `POST /appointments` | `GET /appointments/{insuredId}` |
+|------|----------------------|----------------------------------|
+| `agent` | Any `insuredId` | Any `insuredId` |
+| `insured` | Only their own `insuredId` (must match JWT `sub`) | Only their own `insuredId` |
+
+Requests with a valid token but insufficient role return **403 Forbidden**.
+
+### Generate a token (dev/testing)
 
 ```typescript
 import { signJwt } from "./src/infra/jwt";
 
-const token = signJwt(
-  "01234",              // sub — identifies the caller
-  "<secret-from-ssm>", // retrieve with: aws ssm get-parameter --name /appointments/jwt/secret --with-decryption
-  3600                 // expires in seconds (default: 1 hour)
-);
+// Agent token — can operate on any insured
+const agentToken = signJwt("agent-001", "agent", "<secret-from-ssm>");
+
+// Insured token — restricted to their own insuredId
+const insuredToken = signJwt("01234", "insured", "<secret-from-ssm>");
+
+// Retrieve the secret:
+// aws ssm get-parameter --name /appointments/jwt/secret --with-decryption --query Parameter.Value --output text
 ```
 
-The Lambda Authorizer (`src/api/lambda/authorizer.ts`) validates the token on every request. The authorizer result is cached by API Gateway for 5 minutes per token to avoid repeated SSM and verification overhead.
+The Lambda Authorizer (`src/api/lambda/authorizer.ts`) validates the token and injects `sub` and `role` into the request context. API Gateway caches the authorizer result for 5 minutes per token.
 
 ---
 

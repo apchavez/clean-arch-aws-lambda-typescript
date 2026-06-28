@@ -18,6 +18,12 @@ export const bad = (m: string) => ({
   body: JSON.stringify({ message: m }),
 });
 
+export const forbidden = (m = "Access denied") => ({
+  statusCode: 403,
+  headers: JSON_HEADER,
+  body: JSON.stringify({ message: m }),
+});
+
 export const internal = (m = "Internal server error") => ({
   statusCode: 500,
   headers: JSON_HEADER,

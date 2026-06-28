@@ -1,7 +1,9 @@
 import { createHmac, timingSafeEqual } from "crypto";
+import type { Role } from "../domain/types";
 
 export interface JwtPayload {
   sub: string;
+  role: Role;
   iat: number;
   exp: number;
 }
@@ -43,6 +45,7 @@ export function verifyJwt(token: string, secret: string): JwtPayload {
 
 export function signJwt(
   sub: string,
+  role: Role,
   secret: string,
   expiresInSeconds = 3600
 ): string {
@@ -51,7 +54,7 @@ export function signJwt(
     JSON.stringify({ alg: "HS256", typ: "JWT" })
   ).toString("base64url");
   const payload = Buffer.from(
-    JSON.stringify({ sub, iat: now, exp: now + expiresInSeconds })
+    JSON.stringify({ sub, role, iat: now, exp: now + expiresInSeconds })
   ).toString("base64url");
   const sig = createHmac("sha256", secret)
     .update(`${header}.${payload}`)

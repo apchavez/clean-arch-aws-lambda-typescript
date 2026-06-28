@@ -4,7 +4,8 @@ import type {
   SQSEvent,
 } from "aws-lambda";
 import { appointmentMakeService } from "../../index";
-import { ok, created, bad, internal } from "../../shared/http";
+import { ok, created, bad, forbidden, internal } from "../../shared/http";
+import { getAuthContext } from "../../shared/auth";
 import { logger } from "../../shared/logger";
 import type { CountryISO } from "../../domain/types";
 
@@ -40,6 +41,13 @@ export const createAppointment = async (
     return bad("scheduleId must be a positive integer");
   }
 
+  const auth = getAuthContext(event);
+  if (!auth) return forbidden();
+
+  if (auth.role === "insured" && String(insuredId) !== auth.sub) {
+    return forbidden("insured can only book appointments for themselves");
+  }
+
   try {
     const appointment = await svc.create({
       insuredId: String(insuredId),
@@ -59,6 +67,13 @@ export const listByInsured = async (
   const insuredId = event.pathParameters?.insuredId;
   if (!insuredId) return bad("insuredId required");
   if (!INSURED_ID_RE.test(insuredId)) return bad("insuredId must be 5 digits");
+
+  const auth = getAuthContext(event);
+  if (!auth) return forbidden();
+
+  if (auth.role === "insured" && insuredId !== auth.sub) {
+    return forbidden("insured can only view their own appointments");
+  }
 
   try {
     return ok(await svc.listByInsured(String(insuredId)));
