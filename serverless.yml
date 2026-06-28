@@ -155,6 +155,11 @@ provider:
           Resource: arn:aws:kms:${self:provider.region}:${aws:accountId}:alias/aws/ssm
 
 resources:
+  Conditions:
+    HasAlarmEmail: !Not
+      - !Equals
+          - "${env:ALARM_EMAIL, ''}"
+          - ""
   Resources:
     AppointmentsTable:
       Type: AWS::DynamoDB::Table
@@ -391,3 +396,101 @@ resources:
           GenerateStringKey: password
           PasswordLength: 20
           ExcludeCharacters: '"@/\'
+
+    # ── Observability: DLQ depth alarms ────────────────────────────────────────
+    AlarmsTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: ${self:service}-alarms
+
+    AlarmsTopicPolicy:
+      Type: AWS::SNS::TopicPolicy
+      Properties:
+        Topics:
+          - !Ref AlarmsTopic
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: cloudwatch.amazonaws.com
+              Action: sns:Publish
+              Resource: !Ref AlarmsTopic
+
+    AlarmsEmailSubscription:
+      Type: AWS::SNS::Subscription
+      Condition: HasAlarmEmail
+      Properties:
+        Protocol: email
+        TopicArn: !Ref AlarmsTopic
+        Endpoint: "${env:ALARM_EMAIL, ''}"
+
+    DlqAlarmPE:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        AlarmName: ${self:service}-pe-dlq-depth
+        AlarmDescription: "Messages in PE DLQ — failed appointment processing for Peru"
+        Namespace: AWS/SQS
+        MetricName: ApproximateNumberOfMessagesVisible
+        Dimensions:
+          - Name: QueueName
+            Value: !GetAtt SQSPEDLQ.QueueName
+        Statistic: Maximum
+        Period: 60
+        EvaluationPeriods: 1
+        Threshold: 0
+        ComparisonOperator: GreaterThanThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          - !Ref AlarmsTopic
+        OKActions:
+          - !Ref AlarmsTopic
+
+    DlqAlarmCL:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        AlarmName: ${self:service}-cl-dlq-depth
+        AlarmDescription: "Messages in CL DLQ — failed appointment processing for Chile"
+        Namespace: AWS/SQS
+        MetricName: ApproximateNumberOfMessagesVisible
+        Dimensions:
+          - Name: QueueName
+            Value: !GetAtt SQSCLDLQ.QueueName
+        Statistic: Maximum
+        Period: 60
+        EvaluationPeriods: 1
+        Threshold: 0
+        ComparisonOperator: GreaterThanThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          - !Ref AlarmsTopic
+        OKActions:
+          - !Ref AlarmsTopic
+
+    DlqAlarmConfirmations:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        AlarmName: ${self:service}-confirmations-dlq-depth
+        AlarmDescription: "Messages in Confirmations DLQ — failed status update in DynamoDB"
+        Namespace: AWS/SQS
+        MetricName: ApproximateNumberOfMessagesVisible
+        Dimensions:
+          - Name: QueueName
+            Value: !GetAtt ConfirmationsDLQ.QueueName
+        Statistic: Maximum
+        Period: 60
+        EvaluationPeriods: 1
+        Threshold: 0
+        ComparisonOperator: GreaterThanThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          - !Ref AlarmsTopic
+        OKActions:
+          - !Ref AlarmsTopic
+
+  Outputs:
+    AlarmsTopicArn:
+      Description: "SNS topic for DLQ alarms — subscribe via CLI: aws sns subscribe --topic-arn <arn> --protocol email --notification-endpoint <email>"
+      Value: !Ref AlarmsTopic
+      Export:
+        Name: ${self:service}-alarms-topic-arn

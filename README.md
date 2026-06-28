@@ -395,12 +395,31 @@ See `.github/workflows/ci.yml`.
 
 ---
 
+## Observability
+
+Three **CloudWatch Alarms** fire whenever any Dead Letter Queue accumulates at least one message, signaling a processing failure that needs investigation:
+
+| Alarm | DLQ | Indicates |
+|-------|-----|-----------|
+| `clinic-scheduling-platform-pe-dlq-depth` | `appointments-pe-dlq` | Country worker failed to book appointment in Peru RDS |
+| `clinic-scheduling-platform-cl-dlq-depth` | `appointments-cl-dlq` | Country worker failed to book appointment in Chile RDS |
+| `clinic-scheduling-platform-confirmations-dlq-depth` | `appointments-confirmaciones-dlq` | Confirm Lambda failed to update DynamoDB status |
+
+Alarms publish to an SNS topic (`clinic-scheduling-platform-alarms`) deployed with the stack. To receive email notifications, set `ALARM_EMAIL` before deploying:
+
+```bash
+export ALARM_EMAIL=your@email.com
+npx serverless deploy
+```
+
+The SNS topic ARN is exported as a CloudFormation output (`clinic-scheduling-platform-alarms-topic-arn`) so downstream stacks or CI pipelines can add additional subscribers.
+
+---
+
 ## Future Improvements
 
-- RBAC — extend JWT payload with `role` claim and enforce per-endpoint
 - Place worker Lambdas inside the VPC — enables `PubliclyAccessible: false` on RDS and security group restriction to Lambda SG only
 - Integration tests against real AWS resources
-- CloudWatch alarms on DLQ depth
 - Notifications (Email / SMS) on appointment confirmation
 
 ---
