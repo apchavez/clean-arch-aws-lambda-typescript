@@ -34,9 +34,12 @@ export class DynamoAppointmentStateRepo implements IAppointmentStateRepo {
       new UpdateCommand({
         TableName,
         Key: { appointmentUuid },
-        UpdateExpression: "SET #status = :c",
+        UpdateExpression: "SET #status = :c, updatedAt = :u",
         ExpressionAttributeNames: { "#status": "status" },
-        ExpressionAttributeValues: { ":c": "completed" },
+        ExpressionAttributeValues: {
+          ":c": "completed",
+          ":u": new Date().toISOString(),
+        },
         ConditionExpression: "attribute_exists(appointmentUuid)",
       })
     );

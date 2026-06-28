@@ -11,6 +11,7 @@ module.exports = {
     "src/**/*.ts",
     "!src/infra/db-init.ts",
     "!src/infra/secrets-init.ts",
+    "!src/infra/cfn-response.ts",
     "!src/infra/repos/MySQLCountryBookingRepo.ts",
     "!src/infra/messaging/eventbridge.service.ts",
   ],

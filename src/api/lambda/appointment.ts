@@ -4,8 +4,12 @@ import type {
   SQSEvent,
 } from "aws-lambda";
 import { appointmentMakeService } from "../../index";
-import { ok, created, bad } from "../../shared/http";
+import { ok, created, bad, internal } from "../../shared/http";
+import { logger } from "../../shared/logger";
 import type { CountryISO } from "../../domain/types";
+
+const INSURED_ID_RE = /^\d{5}$/;
+const VALID_COUNTRIES = ["PE", "CL"] as const;
 
 const svc = appointmentMakeService();
 
@@ -26,19 +30,27 @@ export const createAppointment = async (
   if (!insuredId || scheduleId == null || !countryISO) {
     return bad("insuredId, scheduleId and countryISO are required");
   }
-  if (!["PE", "CL"].includes(String(countryISO))) {
+  if (!INSURED_ID_RE.test(String(insuredId))) {
+    return bad("insuredId must be 5 digits");
+  }
+  if (!VALID_COUNTRIES.includes(String(countryISO) as CountryISO)) {
     return bad("countryISO must be 'PE' or 'CL'");
   }
-  if (Number.isNaN(Number(scheduleId))) {
-    return bad("scheduleId must be numeric");
+  if (Number.isNaN(Number(scheduleId)) || Number(scheduleId) < 1) {
+    return bad("scheduleId must be a positive integer");
   }
 
-  const appointment = await svc.create({
-    insuredId: String(insuredId),
-    scheduleId: Number(scheduleId),
-    countryISO: countryISO as CountryISO,
-  });
-  return created(appointment);
+  try {
+    const appointment = await svc.create({
+      insuredId: String(insuredId),
+      scheduleId: Number(scheduleId),
+      countryISO: countryISO as CountryISO,
+    });
+    return created(appointment);
+  } catch (err) {
+    logger.error("createAppointment failed", { error: String(err) });
+    return internal();
+  }
 };
 
 export const listByInsured = async (
@@ -46,7 +58,14 @@ export const listByInsured = async (
 ): Promise<APIGatewayProxyResult> => {
   const insuredId = event.pathParameters?.insuredId;
   if (!insuredId) return bad("insuredId required");
-  return ok(await svc.listByInsured(String(insuredId)));
+  if (!INSURED_ID_RE.test(insuredId)) return bad("insuredId must be 5 digits");
+
+  try {
+    return ok(await svc.listByInsured(String(insuredId)));
+  } catch (err) {
+    logger.error("listByInsured failed", { insuredId, error: String(err) });
+    return internal();
+  }
 };
 
 export const confirmAppointment = async (event: SQSEvent): Promise<void> => {
@@ -55,13 +74,17 @@ export const confirmAppointment = async (event: SQSEvent): Promise<void> => {
     try {
       body = JSON.parse(r.body) as Record<string, unknown>;
     } catch {
-      console.warn("confirmAppointment: skipping malformed record", r.messageId);
+      logger.warn("confirmAppointment: skipping malformed record", {
+        messageId: r.messageId,
+      });
       continue;
     }
     const detail = (body.detail ?? body) as Record<string, unknown>;
     const { appointmentUuid } = detail;
     if (!appointmentUuid) {
-      console.warn("confirmAppointment: record missing appointmentUuid", r.messageId);
+      logger.warn("confirmAppointment: record missing appointmentUuid", {
+        messageId: r.messageId,
+      });
       continue;
     }
     await svc.complete(String(appointmentUuid));

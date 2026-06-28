@@ -14,14 +14,15 @@ export class AppointmentService {
     scheduleId: number;
     countryISO: "PE" | "CL";
   }): Promise<Appointment> {
+    const now = new Date().toISOString();
     const appointment: Appointment = {
       appointmentUuid: randomUUID(),
       insuredId: input.insuredId,
       scheduleId: input.scheduleId,
       countryISO: input.countryISO,
       status: "pending",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
     };
     await this.stateRepo.save(appointment);
     await this.messageBus.publish(appointment);

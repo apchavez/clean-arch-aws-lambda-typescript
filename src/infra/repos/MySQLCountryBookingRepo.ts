@@ -3,6 +3,7 @@ import { SSMClient, GetParameterCommand } from "@aws-sdk/client-ssm";
 import type { Appointment } from "../../domain/entities/Appointment";
 import type { ICountryBookingRepo } from "../../domain/ports/ICountryBookingRepo";
 import type { CountryISO } from "../../domain/types";
+import { logger } from "../../shared/logger";
 
 const ssm = new SSMClient({});
 let cachedPassword: string | null = null;
@@ -41,11 +42,7 @@ async function getPool(country: CountryISO): Promise<mysql.Pool> {
   if (pools[country]) return pools[country];
   const password = await getPassword();
   const { host, port, user, database } = cfg(country);
-  console.log(
-    `RDS ${country} host=${host} db=${database} user=${user} hasPass=${
-      password.length > 0
-    }`
-  );
+  logger.info("Creating RDS connection pool", { country, host, database, user });
   const pool = mysql.createPool({
     host,
     port,
@@ -63,8 +60,9 @@ export class MySQLCountryBookingRepo implements ICountryBookingRepo {
   async book(appointment: Appointment): Promise<void> {
     const pool = await getPool(appointment.countryISO);
     const sql = `
-      INSERT INTO appointments (appointment_uuid, insured_id, schedule_id, country_iso, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO appointments
+        (appointment_uuid, insured_id, schedule_id, country_iso, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `;
     await pool.execute(sql, [
       appointment.appointmentUuid,
@@ -73,6 +71,7 @@ export class MySQLCountryBookingRepo implements ICountryBookingRepo {
       appointment.countryISO,
       appointment.status,
       appointment.createdAt,
+      appointment.updatedAt,
     ]);
   }
 }

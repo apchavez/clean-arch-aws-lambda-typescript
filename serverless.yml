@@ -126,7 +126,8 @@ provider:
             - Fn::GetAtt: [ConfirmationsQueue, Arn]
         - Effect: Allow
           Action: events:PutEvents
-          Resource: "*"
+          Resource:
+            Fn::GetAtt: [AppointmentBus, Arn]
         - Effect: Allow
           Action: ssm:GetParameter
           Resource: arn:aws:ssm:${self:provider.region}:${aws:accountId}:parameter/appointments/rds/*

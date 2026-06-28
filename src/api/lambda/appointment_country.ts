@@ -1,14 +1,12 @@
 import type { SQSHandler } from "aws-lambda";
 import type { Appointment } from "../../domain/entities/Appointment";
-import { MySQLCountryBookingRepo } from "../../infra/repos/MySQLCountryBookingRepo";
-import {
-  sendConfirmation,
-  type Source,
-} from "../../infra/messaging/eventbridge.service";
+import type { EventSource } from "../../domain/types";
+import { appointmentCountryMakeService } from "../../index";
+import { logger } from "../../shared/logger";
 
-const repo = new MySQLCountryBookingRepo();
+const svc = appointmentCountryMakeService();
 
-function makeCountryHandler(source: Source): SQSHandler {
+function makeCountryHandler(source: EventSource): SQSHandler {
   return async (event) => {
     for (const record of event.Records) {
       try {
@@ -16,10 +14,13 @@ function makeCountryHandler(source: Source): SQSHandler {
         const payload = (raw.Message
           ? JSON.parse(raw.Message as string)
           : raw) as Appointment;
-        await repo.book(payload);
-        await sendConfirmation(source, { appointmentUuid: payload.appointmentUuid });
+        await svc.process(source, payload);
       } catch (err) {
-        console.error(`[${source}] failed to process record ${record.messageId}:`, err);
+        logger.error("Failed to process country booking record", {
+          source,
+          messageId: record.messageId,
+          error: String(err),
+        });
         throw err;
       }
     }

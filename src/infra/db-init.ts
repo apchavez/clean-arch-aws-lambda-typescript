@@ -1,7 +1,8 @@
 import { SSMClient, GetParameterCommand } from "@aws-sdk/client-ssm";
 import mysql from "mysql2/promise";
-import https from "https";
-import { URL } from "url";
+import type { CloudFormationCustomResourceEvent } from "aws-lambda";
+import { sendCfnResponse } from "./cfn-response";
+import { logger } from "../shared/logger";
 
 const CREATE_SQL = `
 CREATE TABLE IF NOT EXISTS appointments (
@@ -16,34 +17,13 @@ CREATE TABLE IF NOT EXISTS appointments (
   KEY idx_insured (insured_id)
 );`;
 
-async function sendCfn(event: any, Status: "SUCCESS" | "FAILED", Data?: any) {
-  const body = JSON.stringify({
-    Status,
-    Reason: Data?.error ?? "db-init",
-    PhysicalResourceId: `${event.LogicalResourceId}-v1`,
-    StackId: event.StackId,
-    RequestId: event.RequestId,
-    LogicalResourceId: event.LogicalResourceId,
-    Data,
-  });
-  const u = new URL(event.ResponseURL);
-  await new Promise<void>((resolve, reject) => {
-    const req = https.request(
-      {
-        method: "PUT",
-        hostname: u.hostname,
-        path: u.pathname + u.search,
-        headers: { "content-length": Buffer.byteLength(body) },
-      },
-      (res) => {
-        res.on("end", resolve);
-        res.resume();
-      }
-    );
-    req.on("error", reject);
-    req.write(body);
-    req.end();
-  });
+interface DbInitProps {
+  PeHost: string;
+  ClHost: string;
+  PeDb: string;
+  ClDb: string;
+  User: string;
+  PasswordSsm: string;
 }
 
 async function connectWithRetry(
@@ -53,24 +33,26 @@ async function connectWithRetry(
   db: string,
   attempts = 30,
   delayMs = 10000
-) {
-  let lastErr: any;
+): Promise<mysql.Connection> {
+  let lastErr: unknown;
   for (let i = 1; i <= attempts; i++) {
     try {
-      const conn = await mysql.createConnection({
+      return await mysql.createConnection({
         host,
         user,
         password,
         database: db,
         port: 3306,
-        ssl: { rejectUnauthorized: false },
+        ssl: { rejectUnauthorized: true },
       });
-      return conn;
-    } catch (err: any) {
+    } catch (err: unknown) {
       lastErr = err;
-      console.log(
-        `Attempt ${i}/${attempts} to connect to ${host} failed: ${err.message}`
-      );
+      logger.warn("RDS connection attempt failed", {
+        host,
+        attempt: i,
+        total: attempts,
+        error: err instanceof Error ? err.message : String(err),
+      });
       await new Promise((r) => setTimeout(r, delayMs));
     }
   }
@@ -82,19 +64,22 @@ async function initDb(
   db: string,
   user: string,
   password: string
-) {
+): Promise<void> {
   const conn = await connectWithRetry(host, user, password, db);
   await conn.execute(CREATE_SQL);
   await conn.end();
 }
 
-export const handler = async (event: any) => {
+export const handler = async (
+  event: CloudFormationCustomResourceEvent
+): Promise<void> => {
+  const physicalId = `${event.LogicalResourceId}-v1`;
   try {
     if (event.RequestType === "Delete") {
-      await sendCfn(event, "SUCCESS", { skipped: true });
+      await sendCfnResponse(event, "SUCCESS", physicalId, { skipped: true });
       return;
     }
-    const props = event.ResourceProperties;
+    const props = event.ResourceProperties as unknown as DbInitProps;
     const ssm = new SSMClient({});
     const param = await ssm.send(
       new GetParameterCommand({
@@ -102,15 +87,20 @@ export const handler = async (event: any) => {
         WithDecryption: true,
       })
     );
-    const password = param.Parameter?.Value!;
+    const password = param.Parameter?.Value;
+    if (!password) throw new Error("RDS password not found in SSM");
 
     await initDb(props.PeHost, props.PeDb, props.User, password);
     await initDb(props.ClHost, props.ClDb, props.User, password);
 
-    await sendCfn(event, "SUCCESS", { ok: true });
-  } catch (err: any) {
-    console.error("DbInit failed:", err);
-    await sendCfn(event, "FAILED", { error: err.message });
+    await sendCfnResponse(event, "SUCCESS", physicalId, { ok: true });
+  } catch (err: unknown) {
+    logger.error("DbInit failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    await sendCfnResponse(event, "FAILED", physicalId, {
+      error: err instanceof Error ? err.message : String(err),
+    });
     throw err;
   }
 };

@@ -12,7 +12,7 @@ servers:
     description: API Gateway HTTP API ($default)
     variables:
       apiId:
-        default: q6pljavrk0
+        default: your-api-id
       region:
         default: us-east-1
 tags:
@@ -133,6 +133,7 @@ components:
           example: "01234"
         scheduleId:
           type: integer
+          minimum: 1
           description: Space identifier or key to schedule an appointment. “Space” is the set of 4 fields (medical center, specialty, doctor, and date and time).
           example: 100
         countryISO:
@@ -163,6 +164,7 @@ components:
           example: "01234"
         scheduleId:
           type: integer
+          minimum: 1
           description: Space identifier or key to schedule an appointment. “Space” is the set of 4 fields (medical center, specialty, doctor, and date and time).
           example: 100
         countryISO:

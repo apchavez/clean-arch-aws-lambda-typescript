@@ -1,12 +1,9 @@
-const mockBook = jest.fn();
-const mockSendConfirmation = jest.fn();
+const mockProcess = jest.fn();
 
-jest.mock("../src/infra/repos/MySQLCountryBookingRepo", () => ({
-  MySQLCountryBookingRepo: jest.fn(() => ({ book: mockBook })),
-}));
-
-jest.mock("../src/infra/messaging/eventbridge.service", () => ({
-  sendConfirmation: mockSendConfirmation,
+jest.mock("../src/index", () => ({
+  __esModule: true,
+  appointmentMakeService: () => ({}),
+  appointmentCountryMakeService: () => ({ process: mockProcess }),
 }));
 
 import type { SQSEvent, Context } from "aws-lambda";
@@ -50,62 +47,47 @@ function sqsEvent(body: object): SQSEvent {
 
 describe("appointment_country handler", () => {
   beforeEach(() => {
-    mockBook.mockReset();
-    mockSendConfirmation.mockReset();
+    mockProcess.mockReset();
     cb.mockReset();
     jest.spyOn(console, "error").mockImplementation(() => {});
+    jest.spyOn(console, "info").mockImplementation(() => {});
   });
 
   afterEach(() => {
     jest.restoreAllMocks();
   });
 
-  test("handlerPE -> calls repo.book with payload and sendConfirmation with source appointment.pe", async () => {
-    mockBook.mockResolvedValue(undefined);
-    mockSendConfirmation.mockResolvedValue(undefined);
+  test("handlerPE -> calls svc.process with source=appointment.pe and the parsed payload", async () => {
+    mockProcess.mockResolvedValue(undefined);
 
     await handlerPE(sqsEvent(appointment), ctx, cb);
 
-    expect(mockBook).toHaveBeenCalledTimes(1);
-    expect(mockBook).toHaveBeenCalledWith(appointment);
-    expect(mockSendConfirmation).toHaveBeenCalledTimes(1);
-    expect(mockSendConfirmation).toHaveBeenCalledWith("appointment.pe", {
-      appointmentUuid: "u1",
-    });
+    expect(mockProcess).toHaveBeenCalledTimes(1);
+    expect(mockProcess).toHaveBeenCalledWith("appointment.pe", appointment);
   });
 
-  test("handlerCL -> calls sendConfirmation with source appointment.cl", async () => {
-    mockBook.mockResolvedValue(undefined);
-    mockSendConfirmation.mockResolvedValue(undefined);
+  test("handlerCL -> calls svc.process with source=appointment.cl", async () => {
+    mockProcess.mockResolvedValue(undefined);
 
     await handlerCL(sqsEvent(appointment), ctx, cb);
 
-    expect(mockBook).toHaveBeenCalledTimes(1);
-    expect(mockBook).toHaveBeenCalledWith(appointment);
-    expect(mockSendConfirmation).toHaveBeenCalledWith("appointment.cl", {
-      appointmentUuid: "u1",
-    });
+    expect(mockProcess).toHaveBeenCalledTimes(1);
+    expect(mockProcess).toHaveBeenCalledWith("appointment.cl", appointment);
   });
 
   test("handler -> unwraps SNS envelope when Message field is present", async () => {
-    mockBook.mockResolvedValue(undefined);
-    mockSendConfirmation.mockResolvedValue(undefined);
+    mockProcess.mockResolvedValue(undefined);
 
     await handlerPE(sqsEvent({ Message: JSON.stringify(appointment) }), ctx, cb);
 
-    expect(mockBook).toHaveBeenCalledWith(appointment);
-    expect(mockSendConfirmation).toHaveBeenCalledWith("appointment.pe", {
-      appointmentUuid: "u1",
-    });
+    expect(mockProcess).toHaveBeenCalledWith("appointment.pe", appointment);
   });
 
-  test("handler -> re-throws on repo.book failure and does not call sendConfirmation", async () => {
-    mockBook.mockRejectedValue(new Error("MySQL connection failed"));
+  test("handler -> re-throws on service failure", async () => {
+    mockProcess.mockRejectedValue(new Error("MySQL connection failed"));
 
     await expect(handlerPE(sqsEvent(appointment), ctx, cb)).rejects.toThrow(
       "MySQL connection failed"
     );
-
-    expect(mockSendConfirmation).not.toHaveBeenCalled();
   });
 });

@@ -2,29 +2,25 @@ import {
   EventBridgeClient,
   PutEventsCommand,
 } from "@aws-sdk/client-eventbridge";
+import type { IConfirmationBus } from "../../domain/ports/IConfirmationBus";
+import type { EventSource } from "../../domain/types";
 
-const eb = new EventBridgeClient({});
-const eventBusName = process.env.EB_BUS_NAME!;
+export class EventBridgeConfirmationBus implements IConfirmationBus {
+  private readonly eb = new EventBridgeClient({});
+  private readonly eventBusName = process.env.EB_BUS_NAME!;
 
-export type Source = "appointment.pe" | "appointment.cl";
-interface ConfirmDetail {
-  appointmentUuid: string;
-}
-
-export async function sendConfirmation(
-  source: Source,
-  detail: ConfirmDetail
-): Promise<void> {
-  await eb.send(
-    new PutEventsCommand({
-      Entries: [
-        {
-          Source: source,
-          DetailType: "AppointmentConfirmed",
-          Detail: JSON.stringify(detail),
-          EventBusName: eventBusName,
-        },
-      ],
-    })
-  );
+  async send(source: EventSource, appointmentUuid: string): Promise<void> {
+    await this.eb.send(
+      new PutEventsCommand({
+        Entries: [
+          {
+            Source: source,
+            DetailType: "AppointmentConfirmed",
+            Detail: JSON.stringify({ appointmentUuid }),
+            EventBusName: this.eventBusName,
+          },
+        ],
+      })
+    );
+  }
 }

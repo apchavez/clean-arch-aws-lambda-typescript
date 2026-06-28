@@ -33,9 +33,9 @@ This project simulates a production-grade healthcare booking workflow using asyn
 The application follows **Clean Architecture** principles:
 
 - **Domain layer** — Entities (`Appointment`) and port contracts (`IAppointmentStateRepo`, `IMessageBus`, `ICountryBookingRepo`)
-- **Application layer** — Use cases (`AppointmentService`)
-- **Infrastructure layer** — Adapters for DynamoDB, MySQL, SNS, and EventBridge
-- **API layer** — AWS Lambda handlers
+- **Application layer** — Use cases (`AppointmentService`, `AppointmentCountryService`)
+- **Infrastructure layer** — Adapters for DynamoDB, MySQL, SNS, and EventBridge — each implementing a domain port
+- **API layer** — AWS Lambda handlers (thin: delegate to use cases, return HTTP responses)
 
 ### Serverless Event Flow
 
@@ -72,31 +72,36 @@ Failed messages after 3 retries are routed to a Dead Letter Queue (14-day retent
 ```text
 src/
 ├── api/lambda/
-│   ├── appointment.ts          HTTP handlers (create, list) + SQS confirm handler
-│   └── appointment_country.ts  Unified country worker (PE + CL via factory)
+│   ├── appointment.ts              HTTP handlers (create, list) + SQS confirm handler
+│   └── appointment_country.ts      Country worker (PE + CL via factory pattern)
 ├── app/usecases/
-│   └── appointment.service.ts  Core use cases
+│   ├── appointment.service.ts      Core booking use case
+│   └── appointment-country.service.ts  Country-specific booking + confirmation use case
 ├── docs/
-│   └── openapi.yaml            OpenAPI contract
+│   └── openapi.yaml                OpenAPI 3.1 contract
 ├── domain/
 │   ├── entities/Appointment.ts
 │   ├── ports/
 │   │   ├── IAppointmentStateRepo.ts
+│   │   ├── IConfirmationBus.ts
 │   │   ├── ICountryBookingRepo.ts
 │   │   └── IMessageBus.ts
-│   └── types.ts
+│   └── types.ts                    CountryISO | Status | EventSource
 ├── infra/
-│   ├── config/ddb.ts           DynamoDB client
+│   ├── cfn-response.ts             Shared CloudFormation custom resource response helper
+│   ├── config/ddb.ts               DynamoDB document client
 │   ├── messaging/
-│   │   ├── eventbridge.service.ts
-│   │   └── sns.service.ts
+│   │   ├── eventbridge.service.ts  IConfirmationBus implementation
+│   │   └── sns.service.ts          IMessageBus implementation
 │   ├── repos/
-│   │   ├── DynamoAppointmentStateRepo.ts
-│   │   └── MySQLCountryBookingRepo.ts
-│   ├── db-init.ts              CloudFormation custom resource — creates MySQL tables
-│   └── secrets-init.ts         CloudFormation custom resource — seeds SSM password
+│   │   ├── DynamoAppointmentStateRepo.ts  IAppointmentStateRepo implementation
+│   │   └── MySQLCountryBookingRepo.ts     ICountryBookingRepo implementation
+│   ├── db-init.ts                  CloudFormation custom resource — creates MySQL tables
+│   └── secrets-init.ts             CloudFormation custom resource — seeds SSM password
+├── index.ts                        DI factories (appointmentMakeService, appointmentCountryMakeService)
 └── shared/
-    └── http.ts                 HTTP response helpers
+    ├── http.ts                     HTTP response helpers (ok / created / bad / internal)
+    └── logger.ts                   Structured JSON logger (CloudWatch-compatible)
 postman/
 ├── clinic-scheduling-platform.postman_collection.json
 ├── clinic-scheduling-platform.local.postman_environment.json
@@ -104,7 +109,8 @@ postman/
 tests/
 ├── appointment.handler.unit.test.ts
 ├── appointment.service.unit.test.ts
-└── appointment_country.unit.test.ts
+├── appointment_country.unit.test.ts
+└── appointment-country.service.unit.test.ts
 ```
 
 ---
@@ -145,8 +151,9 @@ Content-Type: application/json
 | Missing body | `Required body` |
 | Malformed JSON | `Invalid body (JSON)` |
 | Missing fields | `insuredId, scheduleId and countryISO are required` |
+| `insuredId` not 5 digits | `insuredId must be 5 digits` |
 | Invalid country | `countryISO must be 'PE' or 'CL'` |
-| Non-numeric scheduleId | `scheduleId must be numeric` |
+| `scheduleId` non-numeric or ≤ 0 | `scheduleId must be a positive integer` |
 
 ---
 
@@ -192,7 +199,7 @@ The following environment variables are injected by Serverless Framework at depl
 | `RDS_PE_PORT` / `RDS_CL_PORT` | RDS port (default 3306) |
 | `RDS_PE_DATABASE` / `RDS_CL_DATABASE` | Database names per country |
 
-For local development with serverless-offline, set the variables you need in a `.env` file (not committed).
+For local development with serverless-offline, copy `.env.example` to `.env` and fill in your values (`.env` is gitignored).
 
 ---
 
@@ -235,7 +242,8 @@ Unit tests cover:
 
 - Lambda handler validation and routing (`appointment.handler.unit.test.ts`)
 - Service layer: DynamoDB writes and SNS publish (`appointment.service.unit.test.ts`)
-- Country worker handlers: SQS processing and EventBridge confirmation (`appointment_country.unit.test.ts`)
+- Country use case: booking + confirmation, error propagation (`appointment-country.service.unit.test.ts`)
+- Country worker handlers: SQS processing, SNS envelope unwrap, re-throw on failure (`appointment_country.unit.test.ts`)
 
 ```bash
 npm test
@@ -333,15 +341,18 @@ See `.github/workflows/ci.yml`.
 
 ## What This Project Demonstrates
 
-- Clean Architecture with dependency inversion (ports & adapters)
-- Event-driven systems with SNS fan-out → SQS per country
-- Multi-database design: DynamoDB for state tracking, MySQL for relational persistence
-- Parameterized Lambda handlers to eliminate code duplication
-- Dead Letter Queues for reliability
-- Typed Lambda events (`APIGatewayProxyEvent`, `SQSEvent`)
-- AWS Serverless Framework with CloudFormation custom resources
-- Unit testing with mocked AWS SDK clients (`aws-sdk-client-mock`)
-- Jest coverage enforcement at 80% threshold
+- Clean Architecture with dependency inversion (ports & adapters) — domain layer has zero infrastructure dependencies
+- Event-driven systems with SNS fan-out → SQS per country (filter by `countryISO` MessageAttribute)
+- Multi-database design: DynamoDB for state tracking, MySQL for relational persistence per country
+- Parameterized Lambda handlers via factory pattern to eliminate code duplication
+- Dead Letter Queues (14-day retention) for all SQS queues — reliability by design
+- Structured JSON logging compatible with CloudWatch Logs Insights
+- Consistent input validation (format + type) aligned with the OpenAPI contract
+- 500 error handling at the Lambda boundary — unhandled exceptions never bubble as uncaught rejections
+- Typed Lambda events (`APIGatewayProxyEvent`, `SQSEvent`, `CloudFormationCustomResourceEvent`)
+- AWS Serverless Framework with CloudFormation custom resources for DB and secrets bootstrap
+- Unit testing with mocked AWS SDK clients (`aws-sdk-client-mock`) and plain interface mocks
+- Jest coverage enforcement at 80% threshold across 26 tests in 4 suites
 
 ---
 

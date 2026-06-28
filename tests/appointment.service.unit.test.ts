@@ -6,12 +6,13 @@ import {
   QueryCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
+import type { AppointmentService } from "../src/app/usecases/appointment.service";
 
 const snsMock = mockClient(SNSClient);
 const ddbMock = mockClient(DynamoDBDocumentClient);
 
 describe("Appointments Service (unit)", () => {
-  let svc: any;
+  let svc: AppointmentService;
 
   beforeAll(async () => {
     process.env.TABLE_APPOINTMENTS = "Appointments";
@@ -37,36 +38,51 @@ describe("Appointments Service (unit)", () => {
     });
 
     expect(ddbMock.commandCalls(PutCommand)).toHaveLength(1);
-    const putIn = ddbMock.commandCalls(PutCommand)[0].args[0].input as any;
+    const putIn = ddbMock.commandCalls(PutCommand)[0].args[0].input as Record<
+      string,
+      unknown
+    >;
+    const item = putIn.Item as Record<string, unknown>;
     expect(putIn.TableName).toBe(process.env.TABLE_APPOINTMENTS);
-    expect(putIn.Item.insuredId).toBe("01234");
-    expect(putIn.Item.scheduleId).toBe(100);
-    expect(putIn.Item.countryISO).toBe("PE");
-    expect(putIn.Item.status).toBe("pending");
+    expect(item.insuredId).toBe("01234");
+    expect(item.scheduleId).toBe(100);
+    expect(item.countryISO).toBe("PE");
+    expect(item.status).toBe("pending");
+    expect(item.createdAt).toBe(item.updatedAt);
     expect(String(putIn.ConditionExpression)).toMatch(
       /attribute_not_exists\s*\(\s*appointmentUuid\s*\)/i
     );
 
     expect(snsMock.commandCalls(PublishCommand)).toHaveLength(1);
-    const pubIn = snsMock.commandCalls(PublishCommand)[0].args[0].input as any;
-    expect(pubIn.MessageAttributes?.countryISO?.StringValue).toBe("PE");
+    const pubIn = snsMock.commandCalls(PublishCommand)[0].args[0].input;
+    const attrs = pubIn.MessageAttributes as Record<
+      string,
+      { StringValue: string }
+    >;
+    expect(attrs?.countryISO?.StringValue).toBe("PE");
 
     expect(out.status).toBe("pending");
     expect(out.appointmentUuid).toBeTruthy();
   });
 
-  test('complete -> marks status as "completed" in Dynamo', async () => {
+  test('complete -> marks status as "completed" and updates updatedAt in Dynamo', async () => {
     ddbMock.on(UpdateCommand).resolves({});
 
     await svc.complete("u1");
 
     expect(ddbMock.commandCalls(UpdateCommand)).toHaveLength(1);
-    const updIn = ddbMock.commandCalls(UpdateCommand)[0].args[0].input as any;
+    const updIn = ddbMock.commandCalls(UpdateCommand)[0].args[0]
+      .input as Record<string, unknown>;
+    const vals = updIn.ExpressionAttributeValues as Record<string, unknown>;
     expect(updIn.TableName).toBe(process.env.TABLE_APPOINTMENTS);
-    expect(updIn.Key.appointmentUuid).toBe("u1");
+    expect((updIn.Key as Record<string, unknown>).appointmentUuid).toBe("u1");
     expect(String(updIn.UpdateExpression)).toMatch(/set\s+#status\s*=\s*:c/i);
-    expect(updIn.ExpressionAttributeNames?.["#status"]).toBe("status");
-    expect(updIn.ExpressionAttributeValues?.[":c"]).toBe("completed");
+    expect(String(updIn.UpdateExpression)).toMatch(/updatedAt\s*=\s*:u/i);
+    expect(
+      (updIn.ExpressionAttributeNames as Record<string, string>)?.["#status"]
+    ).toBe("status");
+    expect(vals?.[":c"]).toBe("completed");
+    expect(typeof vals?.[":u"]).toBe("string");
     expect(String(updIn.ConditionExpression)).toMatch(
       /attribute_exists\s*\(\s*appointmentUuid\s*\)/i
     );
@@ -89,11 +105,13 @@ describe("Appointments Service (unit)", () => {
     const result = await svc.listByInsured("01234");
 
     expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(1);
-    const queryIn = ddbMock.commandCalls(QueryCommand)[0].args[0].input as any;
+    const queryIn = ddbMock.commandCalls(QueryCommand)[0].args[0]
+      .input as Record<string, unknown>;
+    const vals = queryIn.ExpressionAttributeValues as Record<string, unknown>;
     expect(queryIn.TableName).toBe(process.env.TABLE_APPOINTMENTS);
     expect(queryIn.IndexName).toBe("byInsured");
     expect(String(queryIn.KeyConditionExpression)).toMatch(/insuredId\s*=\s*:a/);
-    expect(queryIn.ExpressionAttributeValues?.[":a"]).toBe("01234");
+    expect(vals?.[":a"]).toBe("01234");
     expect(result).toEqual(mockItems);
   });
 });
