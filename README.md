@@ -1,4 +1,4 @@
-[![CI](https://github.com/apchavez/clinic-scheduling-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/apchavez/clinic-scheduling-platform/actions/workflows/ci.yml)
+[![CI](https://github.com/apchavez/clean-arch-aws-lambda-typescript/actions/workflows/ci.yml/badge.svg)](https://github.com/apchavez/clean-arch-aws-lambda-typescript/actions/workflows/ci.yml)
 
 # Clinic Scheduling Platform
 
@@ -422,5 +422,5 @@ The SNS topic ARN is exported as a CloudFormation output (`clinic-scheduling-pla
 
 | Project | Description |
 |---|---|
-| [clinic-scheduling-azure](https://github.com/apchavez/clinic-scheduling-azure) | Azure migration of this platform — same domain and Clean Architecture, rewritten in Java 21 on Azure Functions, Cosmos DB, and Service Bus |
-| [event-driven-integration-service](https://github.com/apchavez/event-driven-integration-service) | Serverless integration service on the same TypeScript / AWS Lambda / DynamoDB stack |
+| [clean-arch-azure-functions-java](https://github.com/apchavez/clean-arch-azure-functions-java) | Azure migration of this platform — same domain and Clean Architecture, rewritten in Java 21 on Azure Functions, Cosmos DB, and Service Bus |
+| [serverless-api-integration-aws](https://github.com/apchavez/serverless-api-integration-aws) | Serverless integration service on the same TypeScript / AWS Lambda / DynamoDB stack |
