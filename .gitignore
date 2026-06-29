@@ -1,0 +1,105 @@
+# =========================
+# Dependencies
+# =========================
+node_modules/
+jspm_packages/
+bower_components/
+
+# Package manager logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# =========================
+# Build / Output
+# =========================
+dist/
+build/
+out/
+coverage/
+.nyc_output/
+
+# Bundlers / Serverless
+.esbuild/
+.webpack/
+.serverless/
+.dynamodb/
+.serverless_plugins/
+
+# TypeScript
+*.tsbuildinfo
+
+# =========================
+# Environment / Secrets
+# =========================
+.env
+.env.*
+!.env.example
+!.env.template
+
+# AWS credentials / local configs
+.aws/
+*.pem
+*.key
+
+# Local runtime data
+.offline-db.json
+tmp/
+.tmp/
+*.tmp
+
+# =========================
+# Logs
+# =========================
+*.log
+logs/
+*.pid
+*.seed
+*.pid.lock
+
+# =========================
+# Testing
+# =========================
+jest-cache/
+.jest-cache/
+coverage-final.json
+
+# =========================
+# IDE / Editor
+# =========================
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# =========================
+# OS Files
+# =========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =========================
+# Generated Docs / Reports
+# =========================
+docs/swagger.html
+docs/swagger.json
+reports/
+*.lcov
+
+# =========================
+# Postman
+# =========================
+# All postman/ files are committed (no secrets — only localhost and placeholder URLs).
+
+# =========================
+# Misc
+# =========================
+.cache/
+.temp/
