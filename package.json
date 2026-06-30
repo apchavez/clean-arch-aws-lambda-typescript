@@ -11,7 +11,9 @@
     "pretest": "tsc -p tsconfig.json",
     "test": "jest",
     "test:coverage": "jest --coverage",
-    "docs": "redocly build-docs ./src/docs/openapi.yaml -o ./docs/swagger.html"
+    "docs": "redocly build-docs ./src/docs/openapi.yaml -o ./docs/swagger.html",
+    "localstack:up": "docker compose -f docker-compose.localstack.yml up -d",
+    "localstack:down": "docker compose -f docker-compose.localstack.yml down -v"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.891.0",

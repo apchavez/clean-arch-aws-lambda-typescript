@@ -38,6 +38,7 @@ coverage/
 .env.*
 !.env.example
 !.env.template
+!.env.localstack
 
 # AWS credentials / local configs
 .aws/

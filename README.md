@@ -293,6 +293,40 @@ docker run -p 3000:3000 clinic-scheduling-platform
 
 > Docker is provided for local development only. The production deployment is serverless via AWS Lambda.
 
+### Local Development with Localstack
+
+Spin up local equivalents of DynamoDB, SQS, SNS, SSM, and EventBridge — plus two MySQL containers for the country workers — without needing an AWS account.
+
+**Prerequisites:** Docker and Docker Compose.
+
+```bash
+# 1. Start Localstack + MySQL (PE on :3307, CL on :3308)
+npm run localstack:up
+
+# 2. Copy the local env file (Localstack endpoints are pre-configured)
+cp .env.localstack .env
+
+# 3. Start the API with serverless-offline
+npm run offline
+# API at http://localhost:3000
+
+# 4. Stop and remove containers when done
+npm run localstack:down
+```
+
+Resources created automatically by `scripts/localstack-init.sh` on Localstack startup:
+
+| Resource | Name |
+|---|---|
+| DynamoDB table | `Appointments` (with GSI `byInsured`) |
+| SNS topic | `appointmentTopic` |
+| SQS queues | `appointments-pe`, `appointments-cl`, `appointments-confirmaciones` + 3 DLQs |
+| SNS → SQS subscriptions | PE filter `countryISO=PE`, CL filter `countryISO=CL` |
+| EventBridge bus | `appointments-bus` |
+| SSM parameters | `/appointments/jwt/secret`, `/appointments/rds/*` |
+
+> **Note:** X-Ray tracing is automatically disabled when `AWS_ENDPOINT_URL` points to Localstack.
+
 ### Build
 
 ```bash
