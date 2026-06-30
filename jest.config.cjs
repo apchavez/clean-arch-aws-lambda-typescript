@@ -7,6 +7,7 @@ module.exports = {
   moduleNameMapper: { "^(\\.{1,2}/.*)\\.js$": "$1" },
   roots: ["<rootDir>/tests", "<rootDir>/src"],
   testMatch: ["**/?(*.)+(spec|test).ts"],
+  testPathIgnorePatterns: ["/node_modules/", "/tests/integration/"],
   collectCoverageFrom: [
     "src/**/*.ts",
     "!src/infra/db-init.ts",
