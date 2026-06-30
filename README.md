@@ -114,6 +114,7 @@ src/
 │   ├── cfn-response.ts             Shared CloudFormation custom resource response helper
 │   ├── config/ddb.ts               DynamoDB document client
 │   ├── jwt.ts                      HS256 JWT sign / verify (timingSafeEqual, base64url)
+│   ├── tracing.ts                  captureAWSClient<T>() wrapper for AWS X-Ray SDK v3
 │   ├── messaging/
 │   │   ├── eventbridge.service.ts  IConfirmationBus implementation
 │   │   └── sns.service.ts          IMessageBus implementation
@@ -425,6 +426,26 @@ See `.github/workflows/ci.yml`.
 ---
 
 ## Observability
+
+### Logging
+
+All Lambda functions emit structured JSON logs to stdout, which CloudWatch Logs captures automatically. Each log entry includes `timestamp`, `level`, `message`, and arbitrary context fields. Pass `{ requestId: context.awsRequestId }` to correlate log entries with X-Ray trace IDs:
+
+```typescript
+logger.info('appointment created', { requestId: ctx.awsRequestId, appointmentUuid });
+```
+
+### Distributed Tracing (X-Ray)
+
+Active tracing is enabled on all Lambda functions and API Gateway (`tracing: lambda: true / apiGateway: true` in `serverless.yml`). AWS X-Ray captures:
+
+- Cold start vs warm invocation duration per function
+- API Gateway → Lambda segments automatically
+- AWS SDK calls instrumented via `captureAWSClient()` in `src/infra/tracing.ts`
+
+The IAM role includes `xray:PutTraceSegments` and `xray:PutTelemetryRecords` permissions. Traces are visible in the AWS X-Ray console and can be queried via CloudWatch ServiceLens.
+
+### CloudWatch Alarms
 
 Three **CloudWatch Alarms** fire whenever any Dead Letter Queue accumulates at least one message, signaling a processing failure that needs investigation:
 
