@@ -20,6 +20,7 @@ jobs:
           scan-type: fs
           scan-ref: .
           severity: CRITICAL,HIGH
+          scanners: vuln
           exit-code: 1
           ignore-unfixed: true
           format: table
