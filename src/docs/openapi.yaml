@@ -1,0 +1,267 @@
+openapi: 3.1.0
+info:
+  title: Clinic Scheduling Platform — AWS
+  version: 1.0.0
+  description: >
+    API for creating and listing appointments. Confirmation is performed asynchronously
+    (SNS → SQS → RDS → EventBridge → SQS) and updates the status in DynamoDB to "completed."
+  contact:
+    name: Alexander Prieto Chavez
+    email: alexander.prieto.chavez@gmail.com
+    url: https://github.com/apchavez
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3000
+    description: Local (serverless-offline)
+  - url: https://{apiId}.execute-api.{region}.amazonaws.com
+    description: AWS API Gateway
+    variables:
+      apiId:
+        default: your-api-id
+      region:
+        default: us-east-1
+
+tags:
+  - name: Appointments
+    description: Appointment creation and consultation operations
+
+security:
+  - BearerAuth: []
+
+paths:
+  /appointments:
+    post:
+      tags: [Appointments]
+      operationId: createAppointment
+      summary: Create a new appointment (initial status "pending")
+      description: >
+        Creates an appointment with initial status "pending" and returns the created appointment object.
+        The `insured` role can only create appointments for their own `insuredId` (must match JWT `sub` claim).
+        The `agent` role can create appointments for any insuredId.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAppointmentRequest"
+            examples:
+              example:
+                value:
+                  insuredId: "01234"
+                  scheduleId: 100
+                  countryISO: "PE"
+      responses:
+        "201":
+          description: Appointment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+              examples:
+                example:
+                  value:
+                    appointmentUuid: "8b2c1f2e-7c24-4a5a-9b4c-6d2e7b1a1b01"
+                    insuredId: "01234"
+                    scheduleId: 100
+                    countryISO: "PE"
+                    status: "pending"
+                    createdAt: "2025-09-13T14:12:00.000Z"
+                    updatedAt: "2025-09-13T14:12:00.000Z"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                missingFields:
+                  value:
+                    message: "insuredId, scheduleId and countryISO are required"
+                invalidInsuredId:
+                  value:
+                    message: "insuredId must be 5 digits"
+                invalidCountry:
+                  value:
+                    message: "countryISO must be 'PE' or 'CL'"
+        "403":
+          description: Missing or invalid Bearer token; or `insured` role attempted to act on behalf of another insuredId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                accessDenied:
+                  value:
+                    message: "Access denied"
+                wrongInsured:
+                  value:
+                    message: "insured can only book appointments for themselves"
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /appointments/{insuredId}:
+    get:
+      tags: [Appointments]
+      operationId: listByInsured
+      summary: List appointments by insured
+      description: >
+        Returns all appointments (pending and completed) for the given insuredId.
+        The `insured` role can only view their own appointments (insuredId must match JWT `sub` claim).
+        The `agent` role can view appointments for any insuredId.
+      parameters:
+        - in: path
+          name: insuredId
+          required: true
+          description: Insured code (5 digits, with leading zeros if applicable)
+          schema:
+            type: string
+            pattern: '^\d{5}$'
+          example: "01234"
+      responses:
+        "200":
+          description: List of insured appointments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Appointment"
+              examples:
+                example:
+                  value:
+                    - appointmentUuid: "8b2c1f2e-7c24-4a5a-9b4c-6d2e7b1a1b01"
+                      insuredId: "01234"
+                      scheduleId: 100
+                      countryISO: "PE"
+                      status: "completed"
+                      createdAt: "2025-09-13T14:12:00.000Z"
+                      updatedAt: "2025-09-13T14:12:05.000Z"
+        "400":
+          description: Parameter validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                missingParam:
+                  value:
+                    message: "insuredId required"
+                invalidFormat:
+                  value:
+                    message: "insuredId must be 5 digits"
+        "403":
+          description: Missing or invalid Bearer token; or `insured` role attempted to view another insuredId's appointments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                accessDenied:
+                  value:
+                    message: "Access denied"
+                wrongInsured:
+                  value:
+                    message: "insured can only view their own appointments"
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        HS256 JWT signed with the secret stored in SSM at /appointments/jwt/secret.
+        The payload must include a `role` claim: "agent" or "insured".
+        Roles: agent = full access to any insuredId;
+               insured = can only create/view their own appointments (sub must match insuredId).
+
+  schemas:
+    CreateAppointmentRequest:
+      type: object
+      required: [insuredId, scheduleId, countryISO]
+      properties:
+        insuredId:
+          type: string
+          description: Insured code (5 digits, with leading zeros if applicable)
+          pattern: '^\d{5}$'
+          example: "01234"
+        scheduleId:
+          type: integer
+          minimum: 1
+          description: >
+            Space identifier for scheduling. A "space" is the combination of
+            medical center, specialty, doctor, and date/time slot.
+          example: 100
+        countryISO:
+          type: string
+          description: Country identifier
+          enum: [PE, CL]
+          example: PE
+
+    Appointment:
+      type: object
+      required:
+        - appointmentUuid
+        - insuredId
+        - scheduleId
+        - countryISO
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        appointmentUuid:
+          type: string
+          format: uuid
+          description: Unique appointment identifier
+          example: "8b2c1f2e-7c24-4a5a-9b4c-6d2e7b1a1b01"
+        insuredId:
+          type: string
+          description: Insured code (5 digits, with leading zeros if applicable)
+          pattern: '^\d{5}$'
+          example: "01234"
+        scheduleId:
+          type: integer
+          minimum: 1
+          description: Space identifier
+          example: 100
+        countryISO:
+          type: string
+          description: ISO country code
+          enum: [PE, CL]
+          example: PE
+        status:
+          type: string
+          description: Appointment status
+          enum: [pending, completed]
+          example: pending
+        createdAt:
+          type: string
+          format: date-time
+          description: Creation timestamp in ISO 8601 (UTC)
+          example: "2025-09-13T14:12:00.000Z"
+        updatedAt:
+          type: string
+          format: date-time
+          description: Last update timestamp in ISO 8601 (UTC)
+          example: "2025-09-13T14:12:00.000Z"
+
+    ErrorResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          example: "Internal server error"
