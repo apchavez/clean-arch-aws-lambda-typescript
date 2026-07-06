@@ -1,0 +1,54 @@
+name: Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Stage to remove
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      region:
+        description: AWS region
+        required: true
+        default: us-east-1
+        type: string
+      confirm:
+        description: 'Type DELETE to confirm stack removal'
+        required: true
+        type: string
+
+jobs:
+  destroy:
+    name: Remove Serverless stack
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.stage }}
+
+    steps:
+      - name: Validate confirmation
+        if: inputs.confirm != 'DELETE'
+        run: |
+          echo "Confirmation did not match DELETE."
+          exit 1
+
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Remove stack
+        run: npx serverless remove --stage ${{ inputs.stage }} --region ${{ inputs.region }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
