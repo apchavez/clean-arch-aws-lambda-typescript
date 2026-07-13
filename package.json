@@ -29,7 +29,7 @@
     "mysql2": "^3.11.0"
   },
   "devDependencies": {
-    "@redocly/cli": "^2.35.1",
+    "@redocly/cli": "^2.39.0",
     "@types/aws-lambda": "^8.10.162",
     "@types/jest": "^29.5.14",
     "@types/node": "^24.3.1",
