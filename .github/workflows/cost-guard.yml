@@ -1,0 +1,69 @@
+name: Cost Guard
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # daily, 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      max_age_hours:
+        description: "Destroy the dev stack if older than this many hours"
+        required: true
+        default: "48"
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+jobs:
+  check-and-destroy:
+    name: Check stack age, auto-destroy if stale
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure cost-guard label exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create cost-guard --repo "${{ github.repository }}" \
+            --color FBCA04 --description "Auto-destroyed by the Cost Guard workflow" 2>/dev/null || true
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Check stack age and trigger destroy if stale
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MAX_AGE_HOURS: ${{ inputs.max_age_hours || '48' }}
+        run: |
+          STACK_NAME=clinic-scheduling-platform-dev
+          CREATION=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+            --query "Stacks[0].CreationTime" --output text 2>/dev/null || true)
+
+          if [ -z "$CREATION" ] || [ "$CREATION" = "None" ]; then
+            echo "No live '$STACK_NAME' stack found — nothing to do."
+            exit 0
+          fi
+
+          CREATION_EPOCH=$(date -d "$CREATION" +%s)
+          NOW_EPOCH=$(date -u +%s)
+          AGE_HOURS=$(( (NOW_EPOCH - CREATION_EPOCH) / 3600 ))
+          echo "Stack '$STACK_NAME' created at $CREATION, age ${AGE_HOURS}h (limit ${MAX_AGE_HOURS}h)."
+
+          if [ "$AGE_HOURS" -lt "$MAX_AGE_HOURS" ]; then
+            echo "Within allowed age, leaving it up."
+            exit 0
+          fi
+
+          echo "Stack exceeds ${MAX_AGE_HOURS}h — triggering Destroy workflow."
+          gh workflow run destroy.yml --repo "${{ github.repository }}" \
+            -f stage=dev -f region=us-east-1 -f confirm=DELETE
+
+          gh issue create --repo "${{ github.repository }}" \
+            --title "Cost Guard: auto-destroyed stale dev stack ($(date -u +%Y-%m-%d))" \
+            --body "\`$STACK_NAME\` was created at $CREATION (age ${AGE_HOURS}h, limit ${MAX_AGE_HOURS}h) and has been automatically torn down by [Cost Guard](../actions/workflows/cost-guard.yml) to avoid ongoing AWS charges. Redeploy on demand via the Deploy workflow." \
+            --label "cost-guard"

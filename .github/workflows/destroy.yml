@@ -1,0 +1,85 @@
+name: Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Stage to remove
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      region:
+        description: AWS region
+        required: true
+        default: us-east-1
+        type: string
+      confirm:
+        description: 'Type DELETE to confirm stack removal'
+        required: true
+        type: string
+
+jobs:
+  destroy:
+    name: Remove Serverless stack
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.stage }}
+
+    steps:
+      - name: Validate confirmation
+        if: inputs.confirm != 'DELETE'
+        run: |
+          echo "Confirmation did not match DELETE."
+          exit 1
+
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.region }}
+
+      - name: Disable RDS deletion protection
+        run: |
+          # DBInstanceIdentifier is ${self:service}-pe/-cl in serverless.yml, with no stage suffix.
+          for id in clinic-scheduling-platform-pe clinic-scheduling-platform-cl; do
+            aws rds modify-db-instance --db-instance-identifier "$id" --no-deletion-protection --apply-immediately 2>/dev/null || echo "Skipping $id (not found or already unprotected)"
+          done
+
+      - name: Remove stack
+        run: npx serverless remove --stage ${{ inputs.stage }} --region ${{ inputs.region }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
+          RDS_VPC_ID: ${{ secrets.RDS_VPC_ID }}
+          RDS_SUBNET_1: ${{ secrets.RDS_SUBNET_1 }}
+          RDS_SUBNET_2: ${{ secrets.RDS_SUBNET_2 }}
+          RDS_ROUTE_TABLE_ID: ${{ secrets.RDS_ROUTE_TABLE_ID }}
+
+      - name: Delete orphaned Lambda log groups
+        run: |
+          # CloudFormation never owns these (Lambda auto-creates them on first invoke),
+          # so `serverless remove` leaves them behind as billable orphans.
+          STACK="clinic-scheduling-platform-${{ inputs.stage }}"
+          for lg in $(aws logs describe-log-groups --log-group-name-prefix "/aws/lambda/$STACK-" --region ${{ inputs.region }} --query "logGroups[].logGroupName" --output text); do
+            aws logs delete-log-group --log-group-name "$lg" --region ${{ inputs.region }}
+          done
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

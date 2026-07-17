@@ -1,0 +1,87 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Deployment stage
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      region:
+        description: AWS region
+        required: true
+        default: us-east-1
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.stage || 'dev' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bootstrap RDS password SSM parameter
+        run: |
+          if ! aws ssm get-parameter --name /appointments/rds/password --region ${{ inputs.region || 'us-east-1' }} >/dev/null 2>&1; then
+            aws ssm put-parameter \
+              --name /appointments/rds/password \
+              --type SecureString \
+              --key-id alias/aws/ssm \
+              --value "$(openssl rand -hex 20)" \
+              --region ${{ inputs.region || 'us-east-1' }}
+          fi
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Bootstrap JWT secret SSM parameter
+        run: |
+          if ! aws ssm get-parameter --name /appointments/jwt/secret --region ${{ inputs.region || 'us-east-1' }} >/dev/null 2>&1; then
+            aws ssm put-parameter \
+              --name /appointments/jwt/secret \
+              --type SecureString \
+              --key-id alias/aws/ssm \
+              --value "$(openssl rand -hex 32)" \
+              --region ${{ inputs.region || 'us-east-1' }}
+          fi
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Clean up orphaned Lambda log groups from a failed prior attempt
+        run: |
+          STACK="clinic-scheduling-platform-${{ inputs.stage || 'dev' }}"
+          if ! aws cloudformation describe-stacks --stack-name "$STACK" --region ${{ inputs.region || 'us-east-1' }} >/dev/null 2>&1; then
+            for lg in $(aws logs describe-log-groups --log-group-name-prefix "/aws/lambda/$STACK-" --region ${{ inputs.region || 'us-east-1' }} --query "logGroups[].logGroupName" --output text); do
+              aws logs delete-log-group --log-group-name "$lg" --region ${{ inputs.region || 'us-east-1' }}
+            done
+          fi
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Deploy
+        run: npx serverless deploy --stage ${{ inputs.stage || 'dev' }} --region ${{ inputs.region || 'us-east-1' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
+          RDS_VPC_ID: ${{ secrets.RDS_VPC_ID }}
+          RDS_SUBNET_1: ${{ secrets.RDS_SUBNET_1 }}
+          RDS_SUBNET_2: ${{ secrets.RDS_SUBNET_2 }}
+          RDS_ROUTE_TABLE_ID: ${{ secrets.RDS_ROUTE_TABLE_ID }}
